@@ -6,11 +6,10 @@ then uses Claude to produce a one-sentence plain-English summary of each story.
 """
 
 import asyncio
-import os
 
 import httpx
-from anthropic import Anthropic
 
+from .llm_client import LLMClient
 from .models import NewsItem
 
 HN_SEARCH_URL = "https://hn.algolia.com/api/v1/search"
@@ -41,12 +40,10 @@ async def _fetch_hn_stories(count: int, client: httpx.AsyncClient) -> list[dict]
     return stories[:count]
 
 
-def _summarise_titles(titles: list[str], client: Anthropic) -> list[str]:
-    """Ask Claude to summarise each headline in one plain sentence."""
+def _summarise_titles(titles: list[str], client: LLMClient) -> list[str]:
+    """Ask the LLM to summarise each headline in one plain sentence."""
     numbered = "\n".join(f"{i+1}. {t}" for i, t in enumerate(titles))
-    message = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=512,
+    response = client.complete(
         messages=[
             {
                 "role": "user",
@@ -57,8 +54,9 @@ def _summarise_titles(titles: list[str], client: Anthropic) -> list[str]:
                 ),
             }
         ],
+        max_tokens=512,
     )
-    lines = message.content[0].text.strip().splitlines()
+    lines = response.content[0].text.strip().splitlines()
     summaries: list[str] = []
     for line in lines:
         # strip leading "1. " etc.
@@ -67,16 +65,20 @@ def _summarise_titles(titles: list[str], client: Anthropic) -> list[str]:
     return summaries
 
 
-async def harvest(count: int = 5) -> list[NewsItem]:
+async def harvest(count: int = 5, client: LLMClient | None = None) -> list[NewsItem]:
     """Fetch and summarise the top `count` AI news stories.
 
     Args:
         count: Number of stories to return.
+        client: LLMClient to use for summarisation. If None, must have ANTHROPIC_API_KEY set.
 
     Returns:
         List of NewsItem with summaries filled in.
     """
-    anthropic_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    if client is None:
+        import os
+        from .llm_client import LLMClient as _LC
+        client = _LC(provider="anthropic", api_key=os.environ["ANTHROPIC_API_KEY"])
 
     async with httpx.AsyncClient(timeout=15) as http:
         raw_stories = await _fetch_hn_stories(count, http)
@@ -85,7 +87,7 @@ async def harvest(count: int = 5) -> list[NewsItem]:
         return []
 
     titles = [s["title"] for s in raw_stories]
-    summaries = _summarise_titles(titles, anthropic_client)
+    summaries = _summarise_titles(titles, client)
 
     items: list[NewsItem] = []
     for story, summary in zip(raw_stories, summaries):
@@ -102,6 +104,9 @@ async def harvest(count: int = 5) -> list[NewsItem]:
 
 
 if __name__ == "__main__":
+    import os
+    from dotenv import load_dotenv
+    load_dotenv()
     results = asyncio.run(harvest())
     for item in results:
         print(f"[{item.points}] {item.title}\n  → {item.summary}\n")

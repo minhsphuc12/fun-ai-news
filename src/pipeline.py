@@ -14,7 +14,6 @@ from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
-from anthropic import Anthropic
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.panel import Panel
@@ -24,6 +23,7 @@ from rich.text import Text
 
 from .deja_vu import find_parallel
 from .harvest import harvest
+from .llm_client import LLMClient
 from .mockery import generate_post
 from .models import MockPost, PostTone, PipelineResult
 
@@ -94,16 +94,15 @@ def _save_output(result: PipelineResult) -> Path:
     return out_path
 
 
-async def run(count: int, tone: PostTone, platform: str) -> PipelineResult:
+async def run(count: int, tone: PostTone, platform: str, client: LLMClient) -> PipelineResult:
     """Execute the full 3-stage pipeline."""
     result = PipelineResult()
-    client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
     # ── Stage 1: Harvest ────────────────────────────────────────────────────
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
                   console=console) as progress:
         task = progress.add_task("Stage 1 — Harvesting AI news from HackerNews…", total=None)
-        news_items = await harvest(count)
+        news_items = await harvest(count, client)
         progress.update(task, completed=True)
 
     console.print(f"[bold]Fetched {len(news_items)} stories.[/bold]\n")
@@ -141,10 +140,6 @@ async def run(count: int, tone: PostTone, platform: str) -> PipelineResult:
 def main() -> None:
     load_dotenv()
 
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        console.print("[red]Error: ANTHROPIC_API_KEY not set. Copy .env.example → .env and add your key.[/red]")
-        sys.exit(1)
-
     parser = ArgumentParser(description="AI News Déjà Vu & Mockery Generator")
     parser.add_argument("--count", type=int, default=int(os.getenv("NEWS_COUNT", "5")),
                         help="Number of news stories to process (default: 5)")
@@ -153,14 +148,34 @@ def main() -> None:
                         help="Comedic tone for generated posts")
     parser.add_argument("--platform", choices=["twitter", "linkedin"], default="twitter",
                         help="Output format")
+    parser.add_argument("--provider", choices=["anthropic", "gemini"],
+                        default=os.getenv("LLM_PROVIDER", "anthropic"),
+                        help="LLM provider to use (default: anthropic)")
     args = parser.parse_args()
 
+    # Resolve and validate the API key for the chosen provider — never log it
+    key_env = "ANTHROPIC_API_KEY" if args.provider == "anthropic" else "GEMINI_API_KEY"
+    api_key = os.environ.get(key_env)
+    if not api_key:
+        console.print(
+            f"[red]Error: {key_env} not set. "
+            f"Copy .env.example → .env and add your key.[/red]"
+        )
+        sys.exit(1)
+
+    client = LLMClient(provider=args.provider, api_key=api_key)
     tone = PostTone(args.tone)
 
     console.print(Rule("[bold magenta]AI News Déjà Vu Generator[/bold magenta]"))
-    console.print(f"Count: [cyan]{args.count}[/cyan]  Tone: [cyan]{tone.value}[/cyan]  Platform: [cyan]{args.platform}[/cyan]\n")
+    console.print(
+        f"Provider: [cyan]{args.provider}[/cyan]  "
+        f"Model: [cyan]{client.model}[/cyan]  "
+        f"Count: [cyan]{args.count}[/cyan]  "
+        f"Tone: [cyan]{tone.value}[/cyan]  "
+        f"Platform: [cyan]{args.platform}[/cyan]\n"
+    )
 
-    result = asyncio.run(run(args.count, tone, args.platform))
+    result = asyncio.run(run(args.count, tone, args.platform, client))
 
     # ── Display results ──────────────────────────────────────────────────────
     console.print(Rule("[bold green]Generated Posts[/bold green]"))

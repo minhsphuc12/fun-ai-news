@@ -4,10 +4,7 @@ Stage 3 – Mockery Engine.
 Takes a NewsItem + HistoricalParallel and produces a funny post via Claude.
 """
 
-import os
-
-from anthropic import Anthropic
-
+from .llm_client import LLMClient
 from .models import HistoricalParallel, MockPost, NewsItem, PostTone
 
 _TONE_INSTRUCTIONS: dict[PostTone, str] = {
@@ -46,7 +43,7 @@ def generate_post(
     parallel: HistoricalParallel,
     tone: PostTone = PostTone.SARCASTIC,
     platform: str = "twitter",
-    client: Anthropic | None = None,
+    client: LLMClient | None = None,
 ) -> MockPost:
     """Generate a funny mocking post for a news item and its historical parallel.
 
@@ -55,13 +52,14 @@ def generate_post(
         parallel: The historical prior art found in stage 2.
         tone: The comedic tone to use.
         platform: Output format — 'twitter' or 'linkedin'.
-        client: Optional pre-created Anthropic client.
+        client: Optional pre-created LLMClient.
 
     Returns:
         A MockPost with the generated text.
     """
     if client is None:
-        client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        import os
+        client = LLMClient(provider="anthropic", api_key=os.environ["ANTHROPIC_API_KEY"])
 
     platform_instruction = (
         _TWITTER_INSTRUCTION if platform == "twitter" else _LINKEDIN_INSTRUCTION
@@ -88,10 +86,9 @@ FORMAT INSTRUCTIONS:
 Write the post now. Be funny. Be specific. Name the old thing explicitly.
 Do not add any preamble — just output the post text directly."""
 
-    response = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=1024,
+    response = client.complete(
         messages=[{"role": "user", "content": prompt}],
+        max_tokens=1024,
     )
 
     post_text = response.content[0].text.strip()

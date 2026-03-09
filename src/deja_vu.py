@@ -6,11 +6,10 @@ to find the oldest, most embarrassing historical parallel.
 """
 
 import json
-import os
 
-from anthropic import Anthropic
 from duckduckgo_search import DDGS
 
+from .llm_client import LLMClient
 from .models import HistoricalParallel, NewsItem
 
 _SYSTEM_PROMPT = """\
@@ -43,20 +42,21 @@ def _web_search(query: str, max_results: int = 5) -> str:
     )
 
 
-def find_parallel(item: NewsItem, client: Anthropic | None = None) -> HistoricalParallel:
+def find_parallel(item: NewsItem, client: LLMClient | None = None) -> HistoricalParallel:
     """Find the best historical parallel for a given AI news item.
 
-    Uses Claude with tool_use + DuckDuckGo web search as a grounding tool.
+    Uses the LLM with tool_use + DuckDuckGo web search as a grounding tool.
 
     Args:
         item: The news item to analyse.
-        client: Optional pre-created Anthropic client.
+        client: Optional pre-created LLMClient.
 
     Returns:
         A HistoricalParallel describing the prior art.
     """
     if client is None:
-        client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        import os
+        client = LLMClient(provider="anthropic", api_key=os.environ["ANTHROPIC_API_KEY"])
 
     tools = [
         {
@@ -81,14 +81,13 @@ def find_parallel(item: NewsItem, client: Anthropic | None = None) -> Historical
 
     messages = [{"role": "user", "content": user_message}]
 
-    # agentic loop: Claude may call web_search multiple times
+    # agentic loop: LLM may call web_search multiple times
     for _ in range(5):  # max 5 tool-use rounds
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1024,
-            system=_SYSTEM_PROMPT,
-            tools=tools,
+        response = client.complete(
             messages=messages,
+            system=_SYSTEM_PROMPT,
+            max_tokens=1024,
+            tools=tools,
         )
 
         # collect any text blocks for the final parse
