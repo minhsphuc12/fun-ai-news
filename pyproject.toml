@@ -1,0 +1,28 @@
+[project]
+name = "fun-ai-news"
+version = "0.1.0"
+description = "AI news déjà vu detector and mockery post generator"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.40.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "rich>=13.0.0",
+    "duckduckgo-search>=6.0.0",
+]
+
+[project.scripts]
+fun-ai-news = "src.pipeline:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
